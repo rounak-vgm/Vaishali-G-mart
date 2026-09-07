@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>E-Commerce Store</title>
+    <title>Vaishali G Mart</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background-color: #f4f6f9; color: #333; padding: 20px; }
@@ -18,11 +18,11 @@
         /* Products Grid */
         .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; margin-top: 15px; }
         .product-card { border: 1px solid #e0e0e0; border-radius: 6px; padding: 15px; text-align: center; background: #fff; }
-        .product-card h3 { font-size: 16px; margin-bottom: 8px; }
+        .product-card h3 { font-size: 16px; margin-bottom: 8px; color: #2c3e50; }
         .price-box { margin: 10px 0; }
         .mrp { text-decoration: line-through; color: #888; margin-right: 8px; font-size: 14px; }
         .selling-price { color: #27ae60; font-weight: bold; font-size: 18px; }
-        .btn { padding: 8px 12px; background: #27ae60; color: #fff; border: none; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 5px; }
+        .btn { padding: 8px 12px; background: #27ae60; color: #fff; border: none; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 5px; font-weight: bold; }
         .btn:hover { background: #219150; }
 
         /* Form & Tables */
@@ -32,8 +32,9 @@
         th { background: #f8f9fa; }
         .badge { padding: 4px 8px; border-radius: 4px; color: #fff; font-size: 12px; font-weight: bold; }
         .status-Pending { background: #f39c12; }
-        .status-Accepted { background: #3498db; }
+        .status-Accepted, .status-Out { background: #3498db; }
         .status-Delivered { background: #27ae60; }
+        .status-Cancelled { background: #e74c3c; }
     </style>
 </head>
 <body>
@@ -93,13 +94,14 @@
                 products = await res.json();
                 renderProducts();
             } catch(e) {
+                console.error("Products Load Error:", e);
                 document.getElementById('product-list').innerText = 'Failed to load products.';
             }
         }
 
         function renderProducts() {
             const container = document.getElementById('product-list');
-            if(products.length === 0) {
+            if(!products || products.length === 0) {
                 container.innerHTML = '<p>No products available.</p>';
                 return;
             }
@@ -107,7 +109,7 @@
                 <div class="product-card">
                     <h3>${p.name}</h3>
                     <div class="price-box">
-                        <span class="mrp">₹${p.mrp}</span>
+                        ${p.mrp ? `<span class="mrp">₹${p.mrp}</span>` : ''}
                         <span class="selling-price">₹${p.selling_price}</span>
                     </div>
                     <button class="btn" onclick="addToCart(${p.id})">Add to Cart</button>
@@ -117,6 +119,7 @@
 
         function addToCart(id) {
             const prod = products.find(p => p.id === id);
+            if(!prod) return;
             const exist = cart.find(item => item.id === id);
             if(exist) {
                 exist.qty += 1;
@@ -162,23 +165,32 @@
                 return;
             }
 
-            const res = await fetch('/api/place-order', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, phone, address, items: cart, total })
-            });
+            try {
+                const res = await fetch('/api/place-order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, phone, address, items: cart, total })
+                });
 
-            const data = await res.json();
-            if(data.success) {
-                alert(`Order placed successfully! Order ID: ${data.orderId}`);
-                cart = [];
-                updateCart();
-                document.getElementById('cust-name').value = '';
-                document.getElementById('cust-phone').value = '';
-                document.getElementById('cust-address').value = '';
-                showSection('track-sec');
-            } else {
-                alert('Failed to place order.');
+                const data = await res.json();
+                if(data.success) {
+                    alert(`Order placed successfully! Order ID: #${data.orderId}`);
+                    cart = [];
+                    updateCart();
+                    document.getElementById('cust-name').value = '';
+                    document.getElementById('cust-phone').value = '';
+                    document.getElementById('cust-address').value = '';
+                    
+                    // Track tab update and view
+                    document.getElementById('track-phone').value = phone;
+                    showSection('track-sec');
+                    trackOrder();
+                } else {
+                    alert('Failed to place order.');
+                }
+            } catch(e) {
+                console.error("Place Order Error:", e);
+                alert("Error placing order. Please try again.");
             }
         }
 
@@ -186,50 +198,70 @@
             const phone = document.getElementById('track-phone').value.trim();
             if(!phone) return alert('Enter phone number.');
 
-            const res = await fetch(`/api/track-order/${phone}`);
-            const orders = await res.json();
+            try {
+                const res = await fetch(`/api/track-order/${phone}`);
+                const orders = await res.json();
 
-            const container = document.getElementById('track-results');
-            if(orders.length === 0) {
-                container.innerHTML = '<p>No active orders found.</p>';
-                return;
+                const container = document.getElementById('track-results');
+                if(!orders || orders.length === 0) {
+                    container.innerHTML = '<p>No active orders found for this number.</p>';
+                    return;
+                }
+
+                container.innerHTML = `
+                    <table>
+                        <tr><th>Order ID</th><th>Items</th><th>Total</th><th>Status</th><th>Action</th></tr>
+                        ${orders.map(o => {
+                            let itemString = 'Items details unavailable';
+                            try {
+                                itemString = JSON.parse(o.items || '[]').map(i => `${i.name} (${i.qty})`).join(', ');
+                            } catch(err) {
+                                itemString = o.items;
+                            }
+
+                            return `
+                                <tr>
+                                    <td>#${o.id}</td>
+                                    <td>${itemString}</td>
+                                    <td>₹${o.total_amount}</td>
+                                    <td><span class="badge status-${o.status ? o.status.replace(/\s+/g, '') : 'Pending'}">${o.status}</span></td>
+                                    <td>
+                                        ${o.status === 'Pending' ? `<button onclick="cancelOrder(${o.id})" style="color:red; cursor:pointer; background:none; border:none; text-decoration:underline;">Cancel</button>` : '-'}
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </table>
+                `;
+            } catch(e) {
+                console.error("Track Order Error:", e);
             }
-
-            container.innerHTML = `
-                <table>
-                    <tr><th>Order ID</th><th>Items</th><th>Total</th><th>Status</th><th>Action</th></tr>
-                    ${orders.map(o => `
-                        <tr>
-                            <td>#${o.id}</td>
-                            <td>${JSON.parse(o.items || '[]').map(i => `${i.name} (${i.qty})`).join(', ')}</td>
-                            <td>₹${o.total_amount}</td>
-                            <td><span class="badge status-${o.status}">${o.status}</span></td>
-                            <td>
-                                ${o.status === 'Pending' ? `<button onclick="cancelOrder(${o.id})" style="color:red; cursor:pointer;">Cancel</button>` : '-'}
-                            </td>
-                        </tr>
-                    `).join('')}
-                </table>
-            `;
         }
 
         async function cancelOrder(orderId) {
             const reason = prompt('Reason for cancellation:');
             if(!reason) return;
 
-            const res = await fetch('/api/cancel-order', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ orderId, reason })
-            });
-            const data = await res.json();
-            if(data.success) {
-                alert('Order cancelled.');
-                trackOrder();
+            try {
+                const res = await fetch('/api/cancel-order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ orderId, reason })
+                });
+                const data = await res.json();
+                if(data.success) {
+                    alert('Order cancelled.');
+                    trackOrder();
+                }
+            } catch(e) {
+                console.error("Cancel Order Error:", e);
             }
         }
 
-        fetchProducts();
+        // Initial Load
+        window.addEventListener('DOMContentLoaded', () => {
+            fetchProducts();
+        });
     </script>
 </body>
 </html>
