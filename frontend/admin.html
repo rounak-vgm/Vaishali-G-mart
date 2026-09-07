@@ -44,54 +44,79 @@
     </div>
 
     <script>
-        // Upload Excel
+        // Upload Excel (Relative URL Fix)
         document.getElementById('uploadForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData();
             formData.append('excelFile', document.getElementById('excelFile').files[0]);
             
-            const res = await fetch('http://localhost:5000/api/upload-excel', { method: 'POST', body: formData });
-            const result = await res.json();
-            document.getElementById('status').innerText = result.message || 'Updated!';
+            try {
+                const res = await fetch('/api/upload-excel', { method: 'POST', body: formData });
+                const result = await res.json();
+                document.getElementById('status').innerText = result.message || 'Updated!';
+            } catch (err) {
+                console.error('Upload Error:', err);
+                document.getElementById('status').innerText = 'Upload failed!';
+            }
         });
 
-        // Load Orders
+        // Load Orders (Relative URL Fix)
         async function loadAdminOrders() {
-            const res = await fetch('http://localhost:5000/api/admin/orders');
-            const orders = await res.json();
+            try {
+                const res = await fetch('/api/admin/orders');
+                const orders = await res.json();
 
-            const tbody = document.getElementById('ordersTableBody');
-            tbody.innerHTML = orders.map(o => {
-                const items = JSON.parse(o.items).map(i => `${i.name} (₹${i.selling_price})`).join('<br>');
-                return `
-                    <tr>
-                        <td>#${o.id}</td>
-                        <td><strong>${o.customer_name}</strong></td>
-                        <td>${o.phone}</td>
-                        <td>${o.address}</td>
-                        <td>${items}</td>
-                        <td><strong>₹${o.total_amount}</strong></td>
-                        <td><span class="badge">${o.status}</span></td>
-                        <td>
-                            <select onchange="updateStatus(${o.id}, this.value)">
-                                <option value="Pending" ${o.status==='Pending'?'selected':''}>Pending</option>
-                                <option value="Out for Delivery" ${o.status==='Out for Delivery'?'selected':''}>Out for Delivery</option>
-                                <option value="Delivered" ${o.status==='Delivered'?'selected':''}>Delivered</option>
-                            </select>
-                        </td>
-                    </tr>
-                `;
-            }).join('');
+                const tbody = document.getElementById('ordersTableBody');
+                if (!orders || orders.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No orders received yet.</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = orders.map(o => {
+                    let items = 'No items';
+                    try {
+                        items = JSON.parse(o.items).map(i => `${i.name} (₹${i.selling_price})`).join('<br>');
+                    } catch(e) {
+                        items = o.items;
+                    }
+
+                    return `
+                        <tr>
+                            <td>#${o.id}</td>
+                            <td><strong>${o.customer_name}</strong></td>
+                            <td>${o.phone}</td>
+                            <td>${o.address}</td>
+                            <td>${items}</td>
+                            <td><strong>₹${o.total_amount}</strong></td>
+                            <td><span class="badge">${o.status}</span></td>
+                            <td>
+                                <select onchange="updateStatus(${o.id}, this.value)">
+                                    <option value="Pending" ${o.status==='Pending'?'selected':''}>Pending</option>
+                                    <option value="Out for Delivery" ${o.status==='Out for Delivery'?'selected':''}>Out for Delivery</option>
+                                    <option value="Delivered" ${o.status==='Delivered'?'selected':''}>Delivered</option>
+                                </select>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Error loading orders:', err);
+            }
         }
 
+        // Update Order Status (Relative URL Fix)
         async function updateStatus(orderId, status) {
-            await fetch('http://localhost:5000/api/admin/update-status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ orderId, status })
-            });
-            alert('Status Updated!');
-            loadAdminOrders();
+            try {
+                await fetch('/api/admin/update-status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ orderId, status })
+                });
+                alert('Status Updated!');
+                loadAdminOrders();
+            } catch (err) {
+                console.error('Error updating status:', err);
+            }
         }
 
         loadAdminOrders();
