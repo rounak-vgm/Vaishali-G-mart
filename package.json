@@ -4,7 +4,10 @@
   "main": "backend/server.js",
   "scripts": {
     "start": "node backend/server.js",
-    "build": "cd backend && npm install"
+    "build": "cd backend && npm install && npm rebuild sqlite3 --build-from-source"
+  },
+  "engines": {
+    "node": "20.x"
   },
   "dependencies": {}
 }
