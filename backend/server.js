@@ -20,7 +20,8 @@ if (!fs.existsSync(uploadDir)) {
 const upload = multer({ dest: 'uploads/' });
 
 // Database Connection
-const db = new sqlite3.Database('./store.db', (err) => {
+const dbPath = path.join(__dirname, 'store.db');
+const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
         console.error("Database connection error:", err);
     } else {
