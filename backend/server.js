@@ -1,179 +1,210 @@
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
-const cors = require('cors');
-const multer = require('multer');
-const xlsx = require('xlsx');
 const path = require('path');
-const fs = require('fs');
+const session = require('express-session');
 
 const app = express();
+const PORT = process.env.PORT || 5000;
 
-// Middleware
-app.use(cors());
+// Middleware Setup
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Set up uploads directory
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir);
-}
-const upload = multer({ dest: 'uploads/' });
+// Session Configuration
+app.use(session({
+    secret: 'vaishali_g_mart_secret_key_2026',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { 
+        secure: false, // Production (HTTPS) mein true karein
+        maxAge: 24 * 60 * 60 * 1000 // 24 Hours
+    }
+}));
+
+// Serve Static Frontend Files (Ek folder bahar `frontend` directory se)
+app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
 // Database Connection
-const dbPath = path.join(__dirname, 'store.db');
-const db = new sqlite3.Database(dbPath, (err) => {
+const db = new sqlite3.Database(path.join(__dirname, 'database.db'), (err) => {
     if (err) {
-        console.error("Database connection error:", err);
+        console.error("Database connection error:", err.message);
     } else {
         console.log("Connected to SQLite Database.");
     }
 });
 
-// Create Tables
+// Database Initialization (Tables Creation)
 db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT,
-        mrp REAL,
-        selling_price REAL
+        name TEXT NOT NULL,
+        category TEXT,
+        mrp REAL NOT NULL,
+        selling_price REAL NOT NULL,
+        stock INTEGER NOT NULL,
+        image_url TEXT
     )`);
 
     db.run(`CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer_name TEXT,
-        phone TEXT,
-        address TEXT,
-        items TEXT,
-        total_amount REAL,
+        customer_name TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        address TEXT NOT NULL,
+        total_price REAL NOT NULL,
+        items TEXT NOT NULL,
         status TEXT DEFAULT 'Pending',
-        cancel_reason TEXT
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
-
-    db.run(`ALTER TABLE orders ADD COLUMN cancel_reason TEXT`, (err) => {
-        // Safe to ignore if column exists
-    });
 });
 
-// ================= API ROUTES =================
+// Admin Auth Guard Middleware
+function checkAdminAuth(req, res, next) {
+    if (req.session && req.session.isAdmin) {
+        next();
+    } else {
+        res.status(401).json({ error: "Unauthorized access" });
+    }
+}
 
-// 1. Fetch All Products
+// ================= PUBLIC API ROUTES =================
+
+// 1. Get All Products
 app.get('/api/products', (req, res) => {
-    db.all("SELECT * FROM products", [], (err, rows) => {
+    db.all(`SELECT * FROM products`, [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(rows);
     });
 });
 
-// 2. Upload Excel & Sync Products (Flexible Column Matching)
-app.post('/api/upload-excel', upload.single('excelFile'), (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+// 2. Place Order (Server-Side Price Verification)
+app.post('/api/place-order', (req, res) => {
+    const { customer_name, phone, address, cart } = req.body;
 
-    try {
-        const workbook = xlsx.readFile(req.file.path);
-        const sheetName = workbook.SheetNames[0];
-        const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    if (!customer_name || !phone || !address || !cart || cart.length === 0) {
+        return res.status(400).json({ error: "All fields and cart items are required." });
+    }
 
-        if (!data || data.length === 0) {
-            return res.status(400).json({ error: 'Excel sheet is empty!' });
+    const productIds = cart.map(item => item.id);
+    const placeholders = productIds.map(() => '?').join(',');
+
+    db.all(`SELECT id, selling_price FROM products WHERE id IN (${placeholders})`, productIds, (err, products) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        let calculatedTotal = 0;
+        const verifiedItems = [];
+
+        for (const item of cart) {
+            const dbProduct = products.find(p => p.id === item.id);
+            if (dbProduct) {
+                calculatedTotal += dbProduct.selling_price * item.quantity;
+                verifiedItems.push({
+                    id: dbProduct.id,
+                    name: item.name,
+                    quantity: item.quantity,
+                    price: dbProduct.selling_price
+                });
+            }
         }
 
-        let insertedCount = 0;
+        const itemsJSON = JSON.stringify(verifiedItems);
 
-        db.serialize(() => {
-            db.run('DELETE FROM products');
-            const stmt = db.prepare('INSERT INTO products (name, mrp, selling_price) VALUES (?, ?, ?)');
+        db.run(
+            `INSERT INTO orders (customer_name, phone, address, total_price, items) VALUES (?, ?, ?, ?, ?)`,
+            [customer_name, phone, address, calculatedTotal, itemsJSON],
+            function (err) {
+                if (err) return res.status(500).json({ error: err.message });
+                res.json({ message: "Order placed successfully!", orderId: this.lastID });
+            }
+        );
+    });
+});
 
-            data.forEach(row => {
-                const keys = Object.keys(row);
-                
-                // Flexible Regex matching for Excel Headers
-                const nameKey = keys.find(k => /name|item|product|description|particulars|title|goods/i.test(k));
-                const mrpKey = keys.find(k => /mrp|m\.r\.p|market|original|list/i.test(k));
-                const priceKey = keys.find(k => /selling|sale|rate|price|offer|final|net/i.test(k));
+// 3. Track Order by Phone
+app.get('/api/track-order/:phone', (req, res) => {
+    db.all(`SELECT * FROM orders WHERE phone = ? ORDER BY id DESC`, [req.params.phone], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows);
+    });
+});
 
-                // Fallback: Agar header detect na ho, to first column ko Name, second ko Price maan lein
-                const name = nameKey ? String(row[nameKey]).trim() : (row[keys[0]] ? String(row[keys[0]]).trim() : '');
-                const mrp = mrpKey ? parseFloat(row[mrpKey]) || 0 : 0;
-                let sellingPrice = priceKey ? parseFloat(row[priceKey]) || 0 : (mrp > 0 ? mrp : (parseFloat(row[keys[1]]) || 0));
+// ================= ADMIN AUTH ROUTES =================
 
-                if (name) {
-                    stmt.run(name, mrp, sellingPrice);
-                    insertedCount++;
-                }
-            });
-            stmt.finalize();
-        });
-
-        res.json({ success: true, message: `${insertedCount} Products imported successfully!` });
-    } catch (err) {
-        console.error("Upload Error:", err);
-        res.status(500).json({ error: err.message });
+// Admin Login
+app.post('/api/admin/login', (req, res) => {
+    const { username, password } = req.body;
+    if (username === 'admin' && password === 'VaishaliG@2026') {
+        req.session.isAdmin = true;
+        res.json({ message: "Login successful" });
+    } else {
+        res.status(401).json({ error: "Invalid credentials" });
     }
 });
 
-// 3. Place New Order
-app.post('/api/place-order', (req, res) => {
-    const { name, phone, address, items, total } = req.body;
-    const itemsJson = JSON.stringify(items || []);
-
-    const stmt = db.prepare("INSERT INTO orders (customer_name, phone, address, items, total_amount) VALUES (?, ?, ?, ?, ?)");
-    stmt.run(name, phone, address, itemsJson, total, function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true, orderId: this.lastID });
-    });
-    stmt.finalize();
+// Check Admin Authentication Status
+app.get('/api/admin/check-auth', (req, res) => {
+    if (req.session && req.session.isAdmin) {
+        res.json({ authenticated: true });
+    } else {
+        res.json({ authenticated: false });
+    }
 });
 
-// 4. Track Orders by Phone Number
-app.get('/api/track-order/:phone', (req, res) => {
-    const phone = req.params.phone;
-    db.all("SELECT * FROM orders WHERE phone = ? AND status != 'Cancelled' ORDER BY id DESC", [phone], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
+// Admin Logout
+app.post('/api/admin/logout', (req, res) => {
+    req.session.destroy((err) => {
+        if (err) return res.status(500).json({ error: "Could not log out" });
+        res.clearCookie('connect.sid');
+        res.json({ message: "Logged out successfully" });
     });
 });
 
-// 5. Cancel Order
-app.post('/api/cancel-order', (req, res) => {
-    const { orderId, reason } = req.body;
-    if (!orderId) return res.status(400).json({ error: "Order ID missing" });
+// ================= PROTECTED ADMIN APIS =================
 
-    const stmt = db.prepare("UPDATE orders SET status = 'Cancelled', cancel_reason = ? WHERE id = ?");
-    stmt.run(reason, orderId, function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
-    });
-    stmt.finalize();
-});
-
-// 6. Get All Orders for Admin Panel
-app.get('/api/admin/orders', (req, res) => {
-    db.all("SELECT * FROM orders ORDER BY id DESC", [], (err, rows) => {
+// Get All Orders
+app.get('/api/admin/orders', checkAdminAuth, (req, res) => {
+    db.all(`SELECT * FROM orders ORDER BY id DESC`, [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(rows);
     });
 });
 
-// 7. Admin Update Order Status
-app.post('/api/admin/update-status', (req, res) => {
-    const { orderId, status } = req.body;
-    const stmt = db.prepare("UPDATE orders SET status = ? WHERE id = ?");
-    stmt.run(status, orderId, function(err) {
+// Add New Product
+app.post('/api/admin/add-product', checkAdminAuth, (req, res) => {
+    const { name, category, mrp, selling_price, stock, image_url } = req.body;
+    db.run(
+        `INSERT INTO products (name, category, mrp, selling_price, stock, image_url) VALUES (?, ?, ?, ?, ?, ?)`,
+        [name, category, mrp, selling_price, stock, image_url],
+        function (err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ message: "Product added successfully!", productId: this.lastID });
+        }
+    );
+});
+
+// Delete Product
+app.delete('/api/admin/delete-product/:id', checkAdminAuth, (req, res) => {
+    db.run(`DELETE FROM products WHERE id = ?`, [req.params.id], function (err) {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
+        res.json({ message: "Product deleted successfully!" });
     });
-    stmt.finalize();
 });
 
-// ================= FRONTEND SERVE =================
-
-app.use(express.static(path.join(__dirname, '../frontend')));
-
-app.get('/{*splat}', (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/index.html'));
+// Update Order Status
+app.post('/api/admin/update-order-status', checkAdminAuth, (req, res) => {
+    const { order_id, status } = req.body;
+    db.run(`UPDATE orders SET status = ? WHERE id = ?`, [status, order_id], function (err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: "Order status updated!" });
+    });
 });
 
-const PORT = process.env.PORT || 5000;
+// ================= FRONTEND CATCH-ALL ROUTING =================
+// Express 5 compatible catch-all router
+app.use((req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'frontend', 'index.html'));
+});
+
+// Start Server
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });

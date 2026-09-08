@@ -1,125 +1,224 @@
 <!DOCTYPE html>
-<html lang="hi">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Admin Panel - Excel & Order Management</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Portal - Vaishali G Mart</title>
     <style>
-        body { font-family: Arial, sans-serif; background: #f4f6f9; padding: 30px; }
-        .card { background: white; padding: 20px; border-radius: 8px; margin-bottom: 25px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #f4f6f9; color: #333; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .login-card { max-width: 400px; margin: 80px auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); text-align: center; }
+        .login-card h2 { margin-bottom: 20px; color: #2c3e50; }
+        .login-card input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px; }
+        .login-card button { width: 100%; padding: 12px; background: #27ae60; color: #fff; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 10px; }
+        .error-msg { color: #e74c3c; margin-top: 10px; font-size: 14px; display: none; }
+        header { display: flex; justify-content: space-between; align-items: center; background: #2c3e50; color: #fff; padding: 15px 25px; border-radius: 8px; margin-bottom: 20px; }
+        .logout-btn { background: #e74c3c; color: #fff; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .section { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .hidden { display: none !important; }
+        input, select { width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #ccc; border-radius: 4px; }
         table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; font-size: 14px; }
-        th { background-color: #343a40; color: white; }
-        .badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; }
-        select { padding: 5px; border-radius: 4px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background: #f8f9fa; }
+        .btn { padding: 8px 12px; background: #3498db; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .badge { padding: 4px 8px; border-radius: 4px; color: #fff; font-size: 12px; font-weight: bold; }
+        .status-Pending { background: #f39c12; }
+        .status-Accepted, .status-Out { background: #3498db; }
+        .status-Delivered { background: #27ae60; }
+        .status-Cancelled { background: #e74c3c; }
     </style>
 </head>
 <body>
+    <div class="container">
+        <!-- LOGIN SECTION -->
+        <div id="login-sec" class="login-card">
+            <h2>Admin Login</h2>
+            <input type="text" id="admin-user" placeholder="Username">
+            <input type="password" id="admin-pass" placeholder="Password">
+            <button onclick="loginAdmin()">Login</button>
+            <p id="login-error" class="error-msg">Invalid Credentials</p>
+        </div>
 
-    <div class="card">
-        <h2>1. Upload Daily Excel Sheet</h2>
-        <form id="uploadForm" style="margin-top:10px;">
-            <input type="file" id="excelFile" accept=".xlsx, .xls" required>
-            <button type="submit" style="padding: 8px 15px; background:#28a745; color:white; border:none; cursor:pointer;">Update Products</button>
-        </form>
-        <p id="status" style="margin-top:8px; font-weight:bold;"></p>
-    </div>
+        <!-- PROTECTED DASHBOARD -->
+        <div id="dashboard-sec" class="hidden">
+            <header>
+                <h1>Admin Control Center</h1>
+                <button class="logout-btn" onclick="logoutAdmin()">Logout</button>
+            </header>
 
-    <div class="card">
-        <h2>2. Customer Received Orders</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Order ID</th>
-                    <th>Customer Name</th>
-                    <th>Phone</th>
-                    <th>Address</th>
-                    <th>Items Ordered</th>
-                    <th>Total</th>
-                    <th>Status</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody id="ordersTableBody"></tbody>
-        </table>
+            <div class="section">
+                <h2>Add Product</h2>
+                <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 10px; margin-top: 10px;">
+                    <input type="text" id="prod-name" placeholder="Product Name">
+                    <input type="number" id="prod-mrp" placeholder="MRP (₹)">
+                    <input type="number" id="prod-price" placeholder="Selling Price (₹)">
+                    <button class="btn" style="height: 42px; margin-top: 8px;" onclick="addProduct()">Add Product</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Product Catalog</h2>
+                <div id="admin-product-list">Loading...</div>
+            </div>
+
+            <div class="section">
+                <h2>Customer Orders</h2>
+                <div id="admin-order-list">Loading...</div>
+            </div>
+        </div>
     </div>
 
     <script>
-        // Upload Excel (Relative URL Fix)
-        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData();
-            formData.append('excelFile', document.getElementById('excelFile').files[0]);
-            
+        window.addEventListener('DOMContentLoaded', async () => {
             try {
-                const res = await fetch('/api/upload-excel', { method: 'POST', body: formData });
-                const result = await res.json();
-                document.getElementById('status').innerText = result.message || 'Updated!';
-            } catch (err) {
-                console.error('Upload Error:', err);
-                document.getElementById('status').innerText = 'Upload failed!';
-            }
+                const res = await fetch('/api/admin/check-auth');
+                const data = await res.json();
+                if (data.authenticated) showDashboard();
+            } catch(e) {}
         });
 
-        // Load Orders (Relative URL Fix)
-        async function loadAdminOrders() {
-            try {
-                const res = await fetch('/api/admin/orders');
-                const orders = await res.json();
+        async function loginAdmin() {
+            const username = document.getElementById('admin-user').value.trim();
+            const password = document.getElementById('admin-pass').value.trim();
+            const errorElem = document.getElementById('login-error');
 
-                const tbody = document.getElementById('ordersTableBody');
-                if (!orders || orders.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No orders received yet.</td></tr>';
-                    return;
-                }
+            const res = await fetch('/api/admin/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
 
-                tbody.innerHTML = orders.map(o => {
-                    let items = 'No items';
-                    try {
-                        items = JSON.parse(o.items).map(i => `${i.name} (₹${i.selling_price})`).join('<br>');
-                    } catch(e) {
-                        items = o.items;
-                    }
+            const data = await res.json();
+            if (data.success) {
+                errorElem.style.display = "none";
+                showDashboard();
+            } else {
+                errorElem.innerText = data.message || "Invalid Credentials";
+                errorElem.style.display = "block";
+            }
+        }
 
-                    return `
+        async function logoutAdmin() {
+            await fetch('/api/admin/logout', { method: 'POST' });
+            location.reload();
+        }
+
+        function showDashboard() {
+            document.getElementById('login-sec').classList.add('hidden');
+            document.getElementById('dashboard-sec').classList.remove('hidden');
+            fetchAdminProducts();
+            fetchAdminOrders();
+        }
+
+        async function fetchAdminProducts() {
+            const res = await fetch('/api/products');
+            const products = await res.json();
+            const container = document.getElementById('admin-product-list');
+
+            if (!products || products.length === 0) {
+                container.innerHTML = '<p>No products found.</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <table>
+                    <tr><th>ID</th><th>Name</th><th>MRP</th><th>Selling Price</th><th>Action</th></tr>
+                    ${products.map(p => `
                         <tr>
-                            <td>#${o.id}</td>
-                            <td><strong>${o.customer_name}</strong></td>
-                            <td>${o.phone}</td>
-                            <td>${o.address}</td>
-                            <td>${items}</td>
-                            <td><strong>₹${o.total_amount}</strong></td>
-                            <td><span class="badge">${o.status}</span></td>
-                            <td>
-                                <select onchange="updateStatus(${o.id}, this.value)">
-                                    <option value="Pending" ${o.status==='Pending'?'selected':''}>Pending</option>
-                                    <option value="Out for Delivery" ${o.status==='Out for Delivery'?'selected':''}>Out for Delivery</option>
-                                    <option value="Delivered" ${o.status==='Delivered'?'selected':''}>Delivered</option>
-                                </select>
-                            </td>
+                            <td>#${p.id}</td>
+                            <td>${p.name}</td>
+                            <td>₹${p.mrp || '-'}</td>
+                            <td>₹${p.selling_price}</td>
+                            <td><button onclick="deleteProduct(${p.id})" style="color:red; background:none; border:none; cursor:pointer;">Delete</button></td>
                         </tr>
-                    `;
-                }).join('');
-            } catch (err) {
-                console.error('Error loading orders:', err);
+                    `).join('')}
+                </table>
+            `;
+        }
+
+        async function addProduct() {
+            const name = document.getElementById('prod-name').value.trim();
+            const mrp = document.getElementById('prod-mrp').value;
+            const price = document.getElementById('prod-price').value;
+
+            if (!name || !price) return alert('Name and Price are required.');
+
+            const res = await fetch('/api/admin/add-product', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, mrp, selling_price: price })
+            });
+            const data = await res.json();
+            if(data.success) {
+                alert('Product added!');
+                fetchAdminProducts();
             }
         }
 
-        // Update Order Status (Relative URL Fix)
-        async function updateStatus(orderId, status) {
-            try {
-                await fetch('/api/admin/update-status', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ orderId, status })
-                });
-                alert('Status Updated!');
-                loadAdminOrders();
-            } catch (err) {
-                console.error('Error updating status:', err);
-            }
+        async function deleteProduct(productId) {
+            if(!confirm('Delete this product?')) return;
+            const res = await fetch('/api/admin/delete-product', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ productId })
+            });
+            const data = await res.json();
+            if(data.success) fetchAdminProducts();
         }
 
-        loadAdminOrders();
+        async function fetchAdminOrders() {
+            const res = await fetch('/api/admin/orders');
+            if(res.status === 401) return;
+            const orders = await res.json();
+            const container = document.getElementById('admin-order-list');
+
+            if (!orders || orders.length === 0) {
+                container.innerHTML = '<p>No orders yet.</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <table>
+                    <tr><th>ID</th><th>Customer</th><th>Phone</th><th>Address</th><th>Items</th><th>Total</th><th>Status</th><th>Action</th></tr>
+                    ${orders.map(o => {
+                        let items = '';
+                        try { items = JSON.parse(o.items).map(i => `${i.name} (${i.qty})`).join(', '); } catch(e) { items = o.items; }
+                        return `
+                            <tr>
+                                <td>#${o.id}</td>
+                                <td>${o.customer_name}</td>
+                                <td>${o.phone}</td>
+                                <td>${o.address}</td>
+                                <td>${items}</td>
+                                <td>₹${o.total_amount}</td>
+                                <td><span class="badge status-${o.status ? o.status.replace(/\s+/g, '') : 'Pending'}">${o.status}</span></td>
+                                <td>
+                                    <select onchange="updateOrderStatus(${o.id}, this.value)">
+                                        <option value="">Status</option>
+                                        <option value="Accepted">Accept</option>
+                                        <option value="Out for Delivery">Out</option>
+                                        <option value="Delivered">Delivered</option>
+                                        <option value="Cancelled">Cancel</option>
+                                    </select>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </table>
+            `;
+        }
+
+        async function updateOrderStatus(orderId, status) {
+            if(!status) return;
+            const res = await fetch('/api/admin/update-order-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orderId, status })
+            });
+            const data = await res.json();
+            if(data.success) fetchAdminOrders();
+        }
     </script>
 </body>
 </html>
